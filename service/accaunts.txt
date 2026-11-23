@@ -11,3 +11,20 @@ agromova
 stitov
 ---руководство
 esokolova
+
+
+1. Перестала рабоать выгрузка Excel;
+2. Не отображаются как-то частично или в целом маршруты обращений;
+3. Изменил стили на карте :
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .leaflet-attribution-flag {
+        display: none !important;
+    }
+    .leaflet-control-attribution {
+        display: none !important;
+    }
+</style>;
+4. Почниить 404 страницу;
+5.

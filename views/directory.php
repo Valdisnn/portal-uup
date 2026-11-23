@@ -6,6 +6,15 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .leaflet-attribution-flag {
+        display: none !important;
+    }
+    .leaflet-control-attribution {
+        display: none !important;
+    }
+</style>
+
 <script>
     document.addEventListener("DOMContentLoaded", function () {
         // Центр Нижнего Новгорода
