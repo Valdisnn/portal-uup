@@ -17,7 +17,7 @@ session_set_cookie_params([
 session_start();
 
 header('Cache-Control: no-store');
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; form-action 'self'; base-uri 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; img-src 'self' data: https://unpkg.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org; frame-ancestors 'none'; form-action 'self'; base-uri 'none'");
 header('X-Content-Type-Options: nosniff');
 header('Content-Type: text/html; charset=utf-8');
 
@@ -170,7 +170,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $passwordValid = false;
 
             if ($u) {
-                // Автоматическая миграция с MD5 на bcrypt
                 if (strlen($u['password']) === 32 && ctype_xdigit($u['password'])) {
                     if (md5($password) === $u['password']) {
                         $passwordValid = true;
@@ -268,9 +267,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Content-Disposition: attachment; filename=appeals_export_' . date('Y-m-d_H-i-s') . '.csv');
                 $output = fopen('php://output', 'w');
                 fputs($output, "\xEF\xBB\xBF");
-                fputcsv($output, ['ID', 'Дата создания', 'Дата закрытия', 'Тема', 'Категория', 'Адрес заявителя', 'Телефон заявителя', 'ФИО заявителя', 'Статус', 'Отдел полиции', 'Участок', 'Адрес участка', 'Телефон участка', 'ФИО участкового', 'Телефон участкового', 'Ответ участкового', 'Маршрут исполнения', 'Оценка', 'Комментарий к оценке', 'Срок исполнения', 'Текст обращения'], ';');
+                fputcsv($output, ['ID', 'Дата создания', 'Дата закрытия', 'Тема', 'Категория', 'Адрес заявителя', 'ФИО заявителя', 'Статус', 'Отдел полиции', 'Участок', 'Адрес участка', 'Телефон участка', 'ФИО участкового', 'Ответ участкового', 'Маршрут исполнения', 'Оценка', 'Комментарий к оценке', 'Срок исполнения', 'Текст обращения'], ';');
 
-                $stmt = query("SELECT a.*, c.name AS citizen_name, c.phone AS citizen_phone, o.name AS officer_name, o.phone AS officer_phone, p.name AS precinct_name, p.address AS precinct_address, p.phone AS precinct_phone, p.district AS precinct_district FROM appeal a LEFT JOIN profile c ON c.id = a.citizen LEFT JOIN profile o ON o.id = a.officer LEFT JOIN precinct p ON p.id = a.precinct_id ORDER BY a.id DESC");
+                $stmt = query("SELECT a.*, c.name AS citizen_name, o.name AS officer_name, p.name AS precinct_name, p.address AS precinct_address, p.phone AS precinct_phone, p.district AS precinct_district
+                               FROM appeal a
+                               LEFT JOIN profile c ON c.id = a.citizen
+                               LEFT JOIN profile o ON o.id = a.officer
+                               LEFT JOIN precinct p ON p.id = a.precinct_id
+                               ORDER BY a.id DESC");
 
                 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                     $closedDate = null;
@@ -284,7 +288,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     while ($routeRow = $routeStmt->fetch(PDO::FETCH_ASSOC)) $routeEvents[] = $routeRow['event'];
                     $route = implode(' → ', $routeEvents);
 
-                    fputcsv($output, [$row['id'], $row['created'], $closedDate ?? '', $row['subject'], $row['category'], $row['address'], $row['citizen_phone'] ?? '', $row['citizen_name'] ?? '', $states[$row['status']] ?? $row['status'], $row['precinct_district'] ?? '', $row['precinct_name'] ?? '', $row['precinct_address'] ?? '', $row['precinct_phone'] ?? '', $row['officer_name'] ?? '', $row['officer_phone'] ?? '', $row['draft'] ?? '', $route, $row['rating'] ?? '', $row['feedback'] ?? '', $row['due'], $row['body']], ';');
+                    fputcsv($output, [$row['id'], $row['created'], $closedDate ?? '', $row['subject'], $row['category'], $row['address'], $row['citizen_name'] ?? '', $states[$row['status']] ?? $row['status'], $row['precinct_district'] ?? '', $row['precinct_name'] ?? '', $row['precinct_address'] ?? '', $row['precinct_phone'] ?? '', $row['officer_name'] ?? '', $row['draft'] ?? '', $route, $row['rating'] ?? '', $row['feedback'] ?? '', $row['due'], $row['body']], ';');
                 }
                 fclose($output);
                 logEvent('info', 'export_csv', "count=all");
@@ -323,6 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($op === 'assign' && $manager) {
                 $p = query('SELECT * FROM precinct WHERE id=?', [intPost('precinct')])->fetch();
+                if (!$p) throw new DomainException('Участок не найден.');
                 query("UPDATE appeal SET precinct_id=?, officer=?, status='assigned' WHERE id=?", [$p['id'], $p['officer'], $id]);
                 event($id, 'Руководитель назначил исполнителя: ' . $p['name']);
                 setFlash('success', 'Исполнитель назначен.');
@@ -379,8 +384,9 @@ if (isset($_GET['file'])) {
 $id = intGet('id');
 $a = null;
 if ($id > 0) {
-    $a = query('SELECT a.*, p.name AS executor FROM appeal a LEFT JOIN profile p ON p.id=a.officer WHERE a.id=?', [$id])->fetch();
-    if (!$a || !allowed($a)) deny();
+    $a = query('SELECT a.*, p.name AS executor FROM appeal a LEFT JOIN profile p ON p.id=a.officer WHERE a.id=?', [$id])->fetch() ?: null;
+    // Несуществующее обращение — не 403, а пропускаем дальше, index.php покажет 404
+    if ($a !== null && !allowed($a)) deny();
 }
 
 function postForm(string $op): string
@@ -391,8 +397,13 @@ function postForm(string $op): string
 function options(): string
 {
     $r = '';
-    foreach (query('SELECT * FROM precinct ORDER BY id') as $p) {
-        $r .= '<option value="' . (int) $p['id'] . '">' . e($p['name']) . '</option>';
+    // Выводим сначала отделы, потом УПП, сгруппированные по районам
+    foreach (query('SELECT * FROM precinct ORDER BY is_department DESC, district, name') as $p) {
+        $label = e($p['district']) . ' — ' . e($p['name']);
+        if (!empty($p['address'])) {
+            $label .= ' (' . e($p['address']) . ')';
+        }
+        $r .= '<option value="' . (int) $p['id'] . '">' . $label . '</option>';
     }
     return $r;
 }
