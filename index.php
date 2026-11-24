@@ -1,10 +1,6 @@
 <?php
 declare(strict_types=1);
-$host = parse_url('http://' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST);
-if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true) || !in_array(strtolower((string) $host), ['localhost', '127.0.0.1', '[::1]'], true)) {
-    http_response_code(403);
-    exit('Доступ через localhost.');
-}
+
 define('PORTAL_REQUEST', true);
 require __DIR__ . '/app.php';
 
@@ -154,6 +150,7 @@ if ($page === 'directory') {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Портал участковых | Нижний Новгород</title>
+<link rel="icon" href="./service/mvd_logo.png" type="image/png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
