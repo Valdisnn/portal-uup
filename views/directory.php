@@ -32,7 +32,7 @@
     .grid-card { margin: 0; display: flex; flex-direction: column; justify-content: space-between; }
 </style>
 
-<script>
+<script nonce="<?= e($cspNonce) ?>">
     document.addEventListener("DOMContentLoaded", function () {
         var map = L.map('map').setView([56.326, 44.005], 11);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -154,7 +154,7 @@ foreach ($precincts as $p) {
         </form>
     </article>
 
-    <script>
+    <script nonce="<?= e($cspNonce) ?>">
         function editNews(id, title, body) {
             document.getElementById('news-op').value = 'edit_news';
             document.getElementById('news-id').value = id;

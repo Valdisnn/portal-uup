@@ -15,7 +15,8 @@ DROP TABLE IF EXISTS `rate_limit`;
 CREATE TABLE `profile` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
 `name` varchar(100) NOT NULL,
-`role` enum('citizen','officer','manager') NOT NULL,
+`role` enum('citizen','officer','department_head','manager') NOT NULL,
+`department_id` int(11) DEFAULT NULL,
 `residence` varchar(150) DEFAULT NULL,
 `login` varchar(50) DEFAULT NULL,
 `password` varchar(255) DEFAULT NULL,
@@ -40,7 +41,7 @@ CONSTRAINT `precinct_ibfk_1` FOREIGN KEY (`officer`) REFERENCES `profile` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `building` (
-`address` varchar(150) NOT NULL,
+    `address` varchar(150) NOT NULL,
 `precinct_id` int(11) NOT NULL,
 `fias_id` char(36) DEFAULT NULL,
 PRIMARY KEY (`address`),
@@ -57,7 +58,7 @@ CREATE TABLE `appeal` (
 `address` varchar(150) NOT NULL,
 `precinct_id` int(11) DEFAULT NULL,
 `officer` int(11) DEFAULT NULL,
-`status` enum('manual','assigned','work','review','closed') NOT NULL DEFAULT 'manual',
+`status` enum('manual','assigned','work','department_review','manager_review','review','closed') NOT NULL DEFAULT 'manual',
 `created` datetime DEFAULT current_timestamp(),
 `due` date NOT NULL,
 `draft` text DEFAULT NULL,
@@ -73,7 +74,7 @@ CONSTRAINT `appeal_ibfk_3` FOREIGN KEY (`officer`) REFERENCES `profile` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `history` (
-`id` int(11) NOT NULL AUTO_INCREMENT,
+    `id` int(11) NOT NULL AUTO_INCREMENT,
 `appeal_id` int(11) NOT NULL,
 `actor` int(11) NOT NULL,
 `event` varchar(255) NOT NULL,
@@ -86,7 +87,7 @@ CONSTRAINT `history_ibfk_2` FOREIGN KEY (`actor`) REFERENCES `profile` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `attachment` (
-`id` int(11) NOT NULL AUTO_INCREMENT,
+    `id` int(11) NOT NULL AUTO_INCREMENT,
 `appeal_id` int(11) NOT NULL,
 `name` varchar(180) NOT NULL,
 `mime` varchar(80) NOT NULL,
@@ -96,7 +97,7 @@ CONSTRAINT `attachment_ibfk_1` FOREIGN KEY (`appeal_id`) REFERENCES `appeal` (`i
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `attachment_part` (
-`attachment_id` int(11) NOT NULL,
+    `attachment_id` int(11) NOT NULL,
 `part_no` int(11) NOT NULL,
 `content` mediumblob NOT NULL,
 PRIMARY KEY (`attachment_id`, `part_no`),
@@ -104,7 +105,7 @@ CONSTRAINT `attachment_part_ibfk_1` FOREIGN KEY (`attachment_id`) REFERENCES `at
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `bulletin` (
-`id` int(11) NOT NULL AUTO_INCREMENT,
+    `id` int(11) NOT NULL AUTO_INCREMENT,
 `title` varchar(180) NOT NULL,
 `body` text NOT NULL,
 `author` int(11) NOT NULL,
@@ -127,7 +128,7 @@ KEY `created` (`created`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `rate_limit` (
-`ip` VARCHAR(45) PRIMARY KEY,
+    `ip` VARCHAR(45) PRIMARY KEY,
 `attempts` INT DEFAULT 0,
 `blocked_until` DATETIME DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -353,6 +354,150 @@ INSERT INTO `precinct` (`id`, `district`, `name`, `officer`, `hours`, `phone`, `
 -- ==========================================
 -- ЗАКРЕПЛЕННЫЕ ДОМА
 -- ==========================================
+-- ==========================================
+-- НАЧАЛЬНИКИ ГОРОДСКИХ ОТДЕЛОВ (демонстрационные учётные записи)
+-- department_id ссылается на precinct.id соответствующего отдела полиции.
+-- Пароль у демонстрационных пользователей общий: тот же хеш, что у остальных демо-аккаунтов.
+-- ==========================================
+INSERT INTO `profile` (`id`, `name`, `role`, `department_id`, `residence`, `login`, `password`) VALUES
+(21, 'Фёдоров Андрей Николаевич', 'department_head', 1, NULL, 'head_avtozavod', @pass),
+(22, 'Крылова Наталья Сергеевна', 'department_head', 2, NULL, 'head_kanavino', @pass),
+(23, 'Михайлов Павел Викторович', 'department_head', 3, NULL, 'head_leninsky', @pass),
+(24, 'Захарова Ирина Александровна', 'department_head', 4, NULL, 'head_moscow', @pass),
+(25, 'Васильев Олег Дмитриевич', 'department_head', 5, NULL, 'head_nizhegorodsky', @pass),
+(26, 'Соловьёв Дмитрий Павлович', 'department_head', 6, NULL, 'head_prioksky', @pass),
+(27, 'Егорова Марина Викторовна', 'department_head', 7, NULL, 'head_sovetsky', @pass),
+(28, 'Николаев Сергей Алексеевич', 'department_head', 8, NULL, 'head_sormovsky', @pass);
+
+ALTER TABLE `profile`
+ADD KEY `idx_profile_department` (`department_id`),
+ADD CONSTRAINT `profile_department_fk`
+FOREIGN KEY (`department_id`) REFERENCES `precinct` (`id`)
+ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+-- Закрепление участковых за УПП. Без этого руководитель не сможет назначить исполнителя.
+UPDATE `precinct`
+SET `officer` = CASE `id`
+WHEN 9 THEN 5
+WHEN 10 THEN 6
+WHEN 11 THEN 7
+WHEN 12 THEN 8
+WHEN 13 THEN 9
+WHEN 14 THEN 11
+WHEN 15 THEN 12
+WHEN 16 THEN 13
+WHEN 17 THEN 14
+WHEN 18 THEN 15
+WHEN 19 THEN 16
+WHEN 20 THEN 17
+WHEN 21 THEN 18
+WHEN 22 THEN 19
+WHEN 23 THEN 20
+WHEN 24 THEN 5
+WHEN 25 THEN 6
+WHEN 26 THEN 7
+WHEN 27 THEN 8
+WHEN 28 THEN 9
+WHEN 29 THEN 11
+WHEN 30 THEN 12
+WHEN 31 THEN 13
+WHEN 32 THEN 14
+WHEN 33 THEN 15
+WHEN 34 THEN 16
+WHEN 35 THEN 17
+WHEN 36 THEN 18
+WHEN 37 THEN 19
+WHEN 38 THEN 20
+WHEN 39 THEN 5
+WHEN 40 THEN 6
+WHEN 41 THEN 7
+WHEN 42 THEN 8
+WHEN 43 THEN 9
+WHEN 44 THEN 11
+WHEN 45 THEN 12
+WHEN 46 THEN 13
+WHEN 47 THEN 14
+WHEN 48 THEN 15
+WHEN 49 THEN 16
+WHEN 50 THEN 17
+WHEN 51 THEN 18
+WHEN 52 THEN 19
+WHEN 53 THEN 20
+WHEN 54 THEN 5
+WHEN 55 THEN 6
+WHEN 56 THEN 7
+WHEN 57 THEN 8
+WHEN 58 THEN 9
+WHEN 59 THEN 11
+WHEN 60 THEN 12
+WHEN 61 THEN 13
+WHEN 62 THEN 14
+WHEN 63 THEN 15
+WHEN 64 THEN 16
+WHEN 65 THEN 17
+WHEN 66 THEN 18
+WHEN 67 THEN 19
+WHEN 68 THEN 20
+WHEN 69 THEN 5
+WHEN 70 THEN 6
+WHEN 71 THEN 7
+WHEN 72 THEN 8
+WHEN 73 THEN 9
+WHEN 74 THEN 11
+WHEN 75 THEN 12
+WHEN 76 THEN 13
+WHEN 77 THEN 14
+WHEN 78 THEN 15
+WHEN 79 THEN 16
+WHEN 80 THEN 17
+WHEN 81 THEN 18
+WHEN 82 THEN 19
+WHEN 83 THEN 20
+WHEN 84 THEN 5
+WHEN 85 THEN 6
+WHEN 86 THEN 7
+WHEN 87 THEN 8
+WHEN 88 THEN 9
+WHEN 89 THEN 11
+WHEN 90 THEN 12
+WHEN 91 THEN 13
+WHEN 92 THEN 14
+WHEN 93 THEN 15
+WHEN 94 THEN 16
+WHEN 95 THEN 17
+WHEN 96 THEN 18
+WHEN 97 THEN 19
+WHEN 98 THEN 20
+WHEN 99 THEN 5
+WHEN 100 THEN 6
+WHEN 101 THEN 7
+WHEN 102 THEN 8
+WHEN 103 THEN 9
+WHEN 104 THEN 11
+WHEN 105 THEN 12
+WHEN 106 THEN 13
+WHEN 107 THEN 14
+WHEN 108 THEN 15
+WHEN 109 THEN 16
+WHEN 110 THEN 17
+WHEN 111 THEN 18
+WHEN 112 THEN 19
+WHEN 113 THEN 20
+WHEN 114 THEN 5
+WHEN 115 THEN 6
+WHEN 116 THEN 7
+WHEN 117 THEN 8
+WHEN 118 THEN 9
+WHEN 119 THEN 11
+WHEN 120 THEN 12
+WHEN 121 THEN 13
+WHEN 122 THEN 14
+WHEN 123 THEN 15
+ELSE `officer`
+END
+WHERE `is_department`=0 AND `officer` IS NULL AND `id` BETWEEN 9 AND 123;
+
 INSERT INTO `building` (`address`, `precinct_id`, `fias_id`) VALUES
 ('Нижний Новгород, ул. Максима Горького, д. 65а', 81, NULL),
 ('Нижний Новгород, ул. Максима Горького, д. 186', 83, NULL),
@@ -402,10 +547,10 @@ INSERT INTO `appeal` (`id`, `citizen`, `category`, `subject`, `body`, `address`,
 (16, 4, 'Шум', 'Громкая музыка в автомобиле', 'Во дворе дома молодые люди оставляют автомобиль с включенной на полную громкость музыкой до глубокой ночи.', 'Нижний Новгород, пр. Героев, д. 60', 64, 13, 'closed', '2026-11-06 23:00:00', '2026-12-06', 'Экипажем ППС пресечены противоправные действия. Водитель привлечен к ответственности за нарушение тишины. Проведена беседа.', 4, 'Приструнили хулиганов.'),
 (17, 1, 'Благоустройство', 'Сломанная скамейка', 'Во дворе дома сломана скамейка, торчит арматура, дети могут пораниться.', 'Нижний Новгород, ул. Максима Горького, д. 186', 83, 14, 'closed', '2026-11-07 10:00:00', '2026-12-07', 'Передано в управляющую компанию ООО «Жилсервис». Скамейка демонтирована, будет установлена новая в рамках благоустройства.', 4, 'Опасно было, хорошо, что убрали.'),
 (18, 2, 'Иное обращение', 'Безнадзорные собаки', 'Во дворе бегает собака без ошейника, лает на детей.', 'Нижний Новгород, ул. Планетная, д. 35', 110, 15, 'closed', '2026-11-08 14:00:00', '2026-12-08', 'По заявке осуществлен выезд ловчей бригады. Животное отловлено и передано в приют.', 5, 'Спасибо.'),
-(19, 3, 'Шум', 'Строительный шум в ночное время', 'В новостройке напротив ведутся монолитные работы в ночное время, прожекторы светят в окна.', 'Нижний Новгород, ул. Родионова, д. 165', 86, 11, 'review', '2026-11-10 02:00:00', '2026-12-10', 'Выездом установлено, что работы ведутся без разрешения на ночное производство. В отношении ООО «СтройТрест» составлен протокол по ст. 3.4 КоАП НО. Выдано предписание.', NULL, NULL),
-(20, 4, 'Благоустройство', 'Затопление подвала', 'В подвале дома стоит вода, появился запах сырости и плесени, есть риск замыкания проводки.', 'Нижний Новгород, ул. Терешковой, д. 11', 89, 8, 'review', '2026-11-10 11:00:00', '2026-12-10', 'Проведена проверка с привлечением инженера УК. Причина затопления - прорыв трубы. Направлено предписание об устранении аварии. Работы ведутся.', NULL, NULL),
-(21, 1, 'Иное обращение', 'Незаконная парковка на газоне', 'Водитель автомобиля КИА Рио систематически паркуется на газоне перед подъездом.', 'Нижний Новгород, ул. Максима Горького, д. 65а', 81, 5, 'review', '2026-11-11 08:30:00', '2026-12-11', 'Владелец установлен. Составлен протокол об административном правонарушении по ст. 3.1 КоАП НО (нарушение правил благоустройства). Материалы направлены в административную комиссию.', NULL, NULL),
-(22, 2, 'Шум', 'Громкая музыка в квартире', 'Соседи сверху постоянно слушают музыку с включенным сабвуфером, стены вибрируют.', 'Нижний Новгород, ул. Движенцев, д. 18', 34, 6, 'review', '2026-11-12 19:00:00', '2026-12-12', 'С жильцами проведена беседа. Нарушитель обязался соблюдать тишину. Взято объяснение. Материал готовится для передачи в административную комиссию.', NULL, NULL),
+(19, 3, 'Шум', 'Строительный шум в ночное время', 'В новостройке напротив ведутся монолитные работы в ночное время, прожекторы светят в окна.', 'Нижний Новгород, ул. Родионова, д. 165', 86, 11, 'manager_review', '2026-11-10 02:00:00', '2026-12-10', 'Выездом установлено, что работы ведутся без разрешения на ночное производство. В отношении ООО «СтройТрест» составлен протокол по ст. 3.4 КоАП НО. Выдано предписание.', NULL, NULL),
+(20, 4, 'Благоустройство', 'Затопление подвала', 'В подвале дома стоит вода, появился запах сырости и плесени, есть риск замыкания проводки.', 'Нижний Новгород, ул. Терешковой, д. 11', 89, 8, 'manager_review', '2026-11-10 11:00:00', '2026-12-10', 'Проведена проверка с привлечением инженера УК. Причина затопления - прорыв трубы. Направлено предписание об устранении аварии. Работы ведутся.', NULL, NULL),
+(21, 1, 'Иное обращение', 'Незаконная парковка на газоне', 'Водитель автомобиля КИА Рио систематически паркуется на газоне перед подъездом.', 'Нижний Новгород, ул. Максима Горького, д. 65а', 81, 5, 'manager_review', '2026-11-11 08:30:00', '2026-12-11', 'Владелец установлен. Составлен протокол об административном правонарушении по ст. 3.1 КоАП НО (нарушение правил благоустройства). Материалы направлены в административную комиссию.', NULL, NULL),
+(22, 2, 'Шум', 'Громкая музыка в квартире', 'Соседи сверху постоянно слушают музыку с включенным сабвуфером, стены вибрируют.', 'Нижний Новгород, ул. Движенцев, д. 18', 34, 6, 'manager_review', '2026-11-12 19:00:00', '2026-12-12', 'С жильцами проведена беседа. Нарушитель обязался соблюдать тишину. Взято объяснение. Материал готовится для передачи в административную комиссию.', NULL, NULL),
 (23, 3, 'Благоустройство', 'Сломанные качели', 'На детской площадке сломано крепление качелей, торчат острые болты.', 'Нижний Новгород, пр. Ленина, д. 79', 52, 7, 'work', '2026-11-13 22:15:00', '2026-12-13', NULL, NULL, NULL),
 (24, 4, 'Иное обращение', 'Мусор на контейнерной площадке', 'Управляющая компания не вывозит крупногабаритный мусор, площадка переполнена.', 'Нижний Новгород, ул. Терешковой, д. 11', 89, 8, 'work', '2026-11-14 12:00:00', '2026-12-14', NULL, NULL, NULL),
 (25, 1, 'Шум', 'Крики соседей', 'В соседней квартире регулярно происходят скандалы с рукоприкладством.', 'Нижний Новгород, ул. Максима Горького, д. 65а', 81, 5, 'work', '2026-11-15 15:30:00', '2026-12-15', NULL, NULL, NULL),
@@ -592,5 +737,12 @@ INSERT INTO `history` (`appeal_id`, `actor`, `event`, `created`) VALUES
 
 (30, 2, 'Обращение зарегистрировано', '2026-11-20 16:00:00'),
 (30, 10, 'Адрес не найден в базе. Передано руководителю для ручного назначения.', '2026-11-20 16:00:05');
+
+-- Демонстрационные согласования начальников отделов для обращений 19–22.
+INSERT INTO `history` (`appeal_id`, `actor`, `event`, `created`) VALUES
+(19, 25, 'Начальник Нижегородского отдела согласовал ответ и передал руководителю', '2026-11-19 09:30:00'),
+(20, 26, 'Начальник Приокского отдела согласовал ответ и передал руководителю', '2026-11-19 11:30:00'),
+(21, 25, 'Начальник Нижегородского отдела согласовал ответ и передал руководителю', '2026-11-20 09:30:00'),
+(22, 22, 'Начальник Канавинского отдела согласовал ответ и передал руководителю', '2026-11-21 10:00:00');
 
 /* При необходимости сброса лимита: DELETE FROM rate_limit; */

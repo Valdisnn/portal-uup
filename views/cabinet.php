@@ -1,15 +1,9 @@
 <p class="role"><?= e($roles[$user['role']]) ?> / <?= e($user['name']) ?></p>
-<h1><?= match ($user['role']) { 'citizen' => 'Мои обращения', 'officer' => 'Назначенные обращения', default => 'Все обращения'} ?>
+<h1><?= match ($user['role']) { 'citizen' => 'Мои обращения', 'officer' => 'Назначенные обращения', 'department_head' => 'Обращения отдела', default => 'Все обращения'} ?>
 </h1>
 
 <?php if ($user['role'] === 'citizen'): ?>
     <a class="btn" href="?page=new" style="margin-bottom: 20px;">Подать обращение</a>
-<?php elseif ($user['role'] === 'manager'): ?>
-    <form method="post" style="margin-bottom: 20px;">
-        <?= token() ?>
-        <input type="hidden" name="op" value="export">
-        <button class="btn" style="background: #128070;">Выгрузить в Excel</button>
-    </form>
 <?php endif ?>
 
 <article>

@@ -45,7 +45,7 @@
 
 <?php if ($page === 'stats'): ?>
 <script src="service/chart.min.js"></script>
-<script>
+<script nonce="<?= e($cspNonce) ?>">
 document.addEventListener("DOMContentLoaded", function () {
     const ctx1 = document.getElementById('categoryChart');
     if (ctx1) {
@@ -113,7 +113,7 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 <?php endif; ?>
 
-<script>
+<script nonce="<?= e($cspNonce) ?>">
 (function() {
     var btn = document.getElementById('scrollToTop');
     if (!btn) return;

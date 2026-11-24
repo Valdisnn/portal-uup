@@ -61,28 +61,30 @@
     <?=postForm('reply')?><label>Проект ответа<textarea name="reply" required maxlength="5000"><?=e($a['draft'])?></textarea></label><button>Передать на согласование</button></form>
 <?php endif?>
 
-<!-- Действия руководителя (Согласование и доработка) -->
-<?php if($user['role']==='manager' && $a['status']==='review'):?>
-    <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 15px; background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--mvd-rule); margin-bottom: 20px;">
-        <?=postForm('approve')?>
-            <button type="submit" style="width: 100%; padding: 14px; font-weight: 600;">Согласовать и направить</button>
-        </form>
-
-        <?=postForm('revise')?>
-            <button type="submit" class="btn-danger" style="width: 100%; padding: 14px; font-weight: 600; background-color: var(--mvd-red); color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: background 0.2s;">Вернуть на доработку</button>
-        </form>
+<!-- Согласование начальником отдела -->
+<?php if($user['role']==='department_head' && $a['status']==='department_review'):?>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:15px;background:#fff;padding:20px;border-radius:12px;border:1px solid var(--mvd-rule);margin-bottom:20px;">
+        <?=postForm('approve')?><button type="submit" style="width:100%;padding:14px;font-weight:600;">Согласовать и передать руководителю</button></form>
+        <?=postForm('revise')?><label>Причина возврата<textarea name="reason" required maxlength="1000"></textarea></label><button type="submit" class="btn-danger" style="width:100%;padding:14px;">Вернуть исполнителю</button></form>
     </div>
-<?php elseif($user['role']==='manager' && $a['status']!=='closed'):?>
-    <!-- Действия руководителя (Назначение) -->
+<?php endif; ?>
+
+<!-- Финальное согласование руководителем -->
+<?php if($user['role']==='manager' && $a['status']==='manager_review'):?>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:15px;background:#fff;padding:20px;border-radius:12px;border:1px solid var(--mvd-rule);margin-bottom:20px;">
+        <?=postForm('approve')?><button type="submit" style="width:100%;padding:14px;font-weight:600;">Согласовать и направить заявителю</button></form>
+        <?=postForm('revise')?><label>Причина возврата<textarea name="reason" required maxlength="1000"></textarea></label><button type="submit" class="btn-danger" style="width:100%;padding:14px;">Вернуть исполнителю</button></form>
+    </div>
+<?php elseif($user['role']==='manager' && $a['status']==='manual'):?>
     <?=postForm('assign')?>
-        <label>Назначение по участку<select name="precinct"><?=options()?></select></label>
+        <label>Назначение по участку<select name="precinct" required><?=options()?></select></label>
         <button>Назначить исполнителя</button>
     </form>
-<?php endif?>
+<?php endif; ?>
 
 <h2>История обращения</h2>
 <div class="timeline">
-    <?php foreach(query('SELECT h.*,u.name FROM history h JOIN profile u ON u.id=h.actor WHERE appeal_id=? ORDER BY h.id',[$id]) as $h):?>
+    <?php foreach(query('SELECT h.*,u.name,u.role AS actor_role FROM history h JOIN profile u ON u.id=h.actor WHERE appeal_id=? ORDER BY h.id',[$id]) as $h):?>
         <?php
     // Определяем цвет и иконку в зависимости от события
     $ev = mb_strtolower($h['event']);
@@ -102,7 +104,7 @@
             <div class="timeline-content">
                 <time><?=e($h['created'])?></time>
                 <p><?=e($h['event'])?></p>
-                <small>Сотрудник: <b><?=e($h['name'])?></b></small>
+                <small><?= e(match ($h['actor_role']) { 'citizen' => 'Гражданин', 'officer' => 'Сотрудник', 'department_head' => 'Начальник отдела', 'manager' => 'Руководитель', default => 'Участник маршрута' }) ?>: <b><?=e($h['name'])?></b></small>
             </div>
         </div>
     <?php endforeach?>

@@ -17,7 +17,8 @@ session_set_cookie_params([
 session_start();
 
 header('Cache-Control: no-store');
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; img-src 'self' data: https://unpkg.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org; frame-ancestors 'none'; form-action 'self'; base-uri 'none'");
+$cspNonce = base64_encode(random_bytes(18));
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{$cspNonce}' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https://photon.komoot.io; img-src 'self' data: https://unpkg.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org; frame-ancestors 'none'; form-action 'self'; base-uri 'none'");
 header('X-Content-Type-Options: nosniff');
 header('Content-Type: text/html; charset=utf-8');
 
@@ -30,7 +31,13 @@ try {
 } catch (Throwable $failure) {
     error_log('Portal UUP: ' . $failure->getMessage());
     http_response_code(503);
-    exit('<!doctype html><html lang="ru"><meta charset="utf-8"><title>Ошибка базы данных</title><link rel="stylesheet" href="style.css"><main><h1>База портала недоступна</h1><p><small>' . htmlspecialchars($failure->getMessage()) . '</small></p></main></html>');
+    exit('<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>503 — Сервис временно недоступен</title><style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f6fa;color:#24324a;font:16px/1.5 Arial,sans-serif;padding:24px}
+    .error-card{width:min(680px,100%);background:#fff;border:1px solid #dce4ef;border-radius:20px;padding:48px;text-align:center;box-shadow:0 18px 60px rgba(28,47,78,.08)}
+    .error-code{font-size:14px;font-weight:700;letter-spacing:.16em;color:#0874bd}.error-icon{width:76px;height:76px;margin:0 auto 22px;border-radius:50%;display:grid;place-items:center;background:#eaf3fb;color:#0874bd;font-size:36px}
+    h1{font-size:clamp(28px,5vw,40px);line-height:1.15;margin:12px 0}.muted{color:#68778d;margin:0 auto;max-width:500px}
+    .hint{margin-top:26px;padding:16px 18px;text-align:left;background:#f6f8fb;border-radius:12px;color:#4a5870;font-size:14px}
+    </style></head><body><main class="error-card"><div class="error-icon">!</div><div class="error-code">ОШИБКА 503</div><h1>Сервис временно недоступен</h1><p class="muted">Не удалось подключиться к базе данных портала. Данные обращений не затронуты. Пожалуйста, проверьте подключение и попробуйте позже.</p></main></body></html>');
 }
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -91,6 +98,14 @@ function allowed(array $a): bool
     $uid = (int) $user['id'];
     return match ($user['role']) {
         'manager' => true,
+        'department_head' => (int)($user['department_id'] ?? 0) > 0
+            && (int)query(
+                'SELECT COUNT(*) FROM appeal a
+                 JOIN precinct up ON up.id=a.precinct_id
+                 WHERE a.id=? AND up.district=(SELECT d.district FROM precinct d WHERE d.id=? AND d.is_department=1)
+                   AND up.is_department=0',
+                [(int)$a['id'], (int)$user['department_id']]
+            )->fetchColumn() > 0,
         'officer' => isset($a['officer']) && (int) $a['officer'] === $uid,
         'citizen' => isset($a['citizen']) && (int) $a['citizen'] === $uid,
         default => false,
@@ -136,8 +151,8 @@ $sessionUid = intValue($_SESSION['uid'] ?? 0);
 if ($sessionUid > 0) {
     $user = query('SELECT * FROM profile WHERE id=?', [$sessionUid])->fetch() ?: null;
 }
-$roles = ['citizen' => 'Гражданин', 'officer' => 'Участковый', 'manager' => 'Руководитель'];
-$states = ['manual' => 'Ручное назначение', 'assigned' => 'Назначено', 'work' => 'В работе', 'review' => 'На согласовании', 'closed' => 'Ответ направлен'];
+$roles = ['citizen' => 'Гражданин', 'officer' => 'Участковый', 'department_head' => 'Начальник отдела', 'manager' => 'Руководитель'];
+$states = ['manual' => 'Ручное назначение', 'assigned' => 'Назначено', 'work' => 'В работе', 'department_review' => 'На согласовании у начальника отдела', 'manager_review' => 'На согласовании у руководителя', 'closed' => 'Ответ направлен'];
 $categories = ['Шум', 'Благоустройство', 'Иное обращение'];
 $error = '';
 
@@ -224,6 +239,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $category = field('category', 60);
             $address = field('address', 150, false) ?: (string) ($user['residence'] ?? '');
+            // Приводим распространённые варианты написания к формату адресного справочника.
+            $address = preg_replace('/\\s+/u', ' ', trim($address));
+            $address = preg_replace('/^Нижний Новгород,?\\s*/ui', 'Нижний Новгород, ', $address);
+            $address = str_ireplace(
+                ['улица ', 'проспект ', 'переулок ', 'набережная ', 'площадь '],
+                ['ул. ', 'пр. ', 'пер. ', 'наб. ', 'пл. '],
+                $address
+            );
             $p = query('SELECT p.* FROM building b JOIN precinct p ON p.id=b.precinct_id WHERE b.address=?', [$address])->fetch();
             $precinctId = $p ? (int) $p['id'] : null;
             $officerId = $p ? (int) $p['officer'] : null;
@@ -261,7 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $dest = '?id=' . $id;
 
-        } elseif ($user['role'] === 'manager') {
+        } elseif (in_array($user['role'], ['manager', 'department_head'], true) && !in_array($op, ['assign', 'approve', 'revise'], true)) {
             if ($op === 'export') {
                 header('Content-Type: text/csv; charset=utf-8');
                 header('Content-Disposition: attachment; filename=appeals_export_' . date('Y-m-d_H-i-s') . '.csv');
@@ -269,12 +292,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 fputs($output, "\xEF\xBB\xBF");
                 fputcsv($output, ['ID', 'Дата создания', 'Дата закрытия', 'Тема', 'Категория', 'Адрес заявителя', 'ФИО заявителя', 'Статус', 'Отдел полиции', 'Участок', 'Адрес участка', 'Телефон участка', 'ФИО участкового', 'Ответ участкового', 'Маршрут исполнения', 'Оценка', 'Комментарий к оценке', 'Срок исполнения', 'Текст обращения'], ';');
 
+                $exportFrom = trim((string)($_POST['date_from'] ?? ''));
+                $exportTo = trim((string)($_POST['date_to'] ?? ''));
+                $exportWhere = '';
+                $exportArgs = [];
+                if ($user['role'] === 'department_head') {
+                    $departmentId = (int)($user['department_id'] ?? 0);
+                    if ($departmentId <= 0) throw new RuntimeException('Для учётной записи начальника отдела не указан отдел.');
+                    $exportWhere = "WHERE EXISTS (
+                        SELECT 1 FROM precinct up
+                        JOIN precinct dep ON dep.district=up.district AND dep.is_department=1
+                        WHERE up.id=a.precinct_id AND up.is_department=0 AND dep.id=?
+                    )";
+                    $exportArgs[] = $departmentId;
+                }
+                if ($exportFrom !== '' && $exportTo !== '') {
+                    $fromDate = DateTime::createFromFormat('!Y-m-d', $exportFrom);
+                    $toDate = DateTime::createFromFormat('!Y-m-d', $exportTo);
+                    if (!$fromDate || !$toDate || $fromDate->format('Y-m-d') !== $exportFrom ||
+                        $toDate->format('Y-m-d') !== $exportTo || $exportFrom > $exportTo) {
+                        throw new RuntimeException('Проверьте диапазон дат для выгрузки.');
+                    }
+                    $dateCondition = 'DATE(a.created) BETWEEN ? AND ?';
+                    if ($exportWhere !== '') {
+                        $exportWhere .= ' AND ' . $dateCondition;
+                    } else {
+                        $exportWhere = 'WHERE ' . $dateCondition;
+                    }
+                    $exportArgs[] = $exportFrom;
+                    $exportArgs[] = $exportTo;
+                } elseif ($exportFrom !== '' || $exportTo !== '') {
+                    throw new RuntimeException('Для выгрузки укажите обе даты.');
+                }
+
                 $stmt = query("SELECT a.*, c.name AS citizen_name, o.name AS officer_name, p.name AS precinct_name, p.address AS precinct_address, p.phone AS precinct_phone, p.district AS precinct_district
                                FROM appeal a
                                LEFT JOIN profile c ON c.id = a.citizen
                                LEFT JOIN profile o ON o.id = a.officer
                                LEFT JOIN precinct p ON p.id = a.precinct_id
-                               ORDER BY a.id DESC");
+                               $exportWhere
+                               ORDER BY a.id DESC", $exportArgs);
 
                 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                     $closedDate = null;
@@ -291,7 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     fputcsv($output, [$row['id'], $row['created'], $closedDate ?? '', $row['subject'], $row['category'], $row['address'], $row['citizen_name'] ?? '', $states[$row['status']] ?? $row['status'], $row['precinct_district'] ?? '', $row['precinct_name'] ?? '', $row['precinct_address'] ?? '', $row['precinct_phone'] ?? '', $row['officer_name'] ?? '', $row['draft'] ?? '', $route, $row['rating'] ?? '', $row['feedback'] ?? '', $row['due'], $row['body']], ';');
                 }
                 fclose($output);
-                logEvent('info', 'export_csv', "count=all");
+                logEvent('info', 'export_csv', "from={$exportFrom};to={$exportTo}");
                 exit;
             }
 
@@ -322,12 +379,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$a || !allowed($a)) deny();
 
             $manager = $user['role'] === 'manager';
+            $departmentHead = $user['role'] === 'department_head';
             $officer = $user['role'] === 'officer';
             $s = $a['status'];
 
             if ($op === 'assign' && $manager) {
-                $p = query('SELECT * FROM precinct WHERE id=?', [intPost('precinct')])->fetch();
-                if (!$p) throw new DomainException('Участок не найден.');
+                $p = query('SELECT * FROM precinct WHERE id=? AND is_department=0 AND officer IS NOT NULL', [intPost('precinct')])->fetch();
+                if (!$p) throw new DomainException('Выберите участок, за которым закреплён сотрудник.');
                 query("UPDATE appeal SET precinct_id=?, officer=?, status='assigned' WHERE id=?", [$p['id'], $p['officer'], $id]);
                 event($id, 'Руководитель назначил исполнителя: ' . $p['name']);
                 setFlash('success', 'Исполнитель назначен.');
@@ -338,18 +396,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setFlash('success', 'Обращение в работе.');
                 logEvent('info', 'appeal_taken', "appeal_id={$id}");
             } elseif ($op === 'reply' && $officer && $s === 'work') {
-                query("UPDATE appeal SET status='review', draft=? WHERE id=?", [field('reply', 5000), $id]);
-                event($id, 'Ответ передан на согласование');
+                query("UPDATE appeal SET status='department_review', draft=? WHERE id=?", [field('reply', 5000), $id]);
+                event($id, 'Ответ передан на согласование начальнику отдела');
                 setFlash('success', 'Ответ отправлен.');
                 logEvent('info', 'appeal_replied', "appeal_id={$id}");
-            } elseif ($op === 'approve' && $manager && $s === 'review') {
-                query("UPDATE appeal SET status='closed' WHERE id=?", [$id]);
-                event($id, 'Ответ согласован');
-                setFlash('success', 'Согласовано.');
-                logEvent('info', 'appeal_approved', "appeal_id={$id}");
-            } elseif ($op === 'revise' && $manager && $s === 'review') {
+            } elseif ($op === 'approve' && $departmentHead && $s === 'department_review') {
+                query("UPDATE appeal SET status='manager_review' WHERE id=?", [$id]);
+                event($id, 'Начальник отдела согласовал ответ и передал руководителю');
+                setFlash('success', 'Передано руководителю на финальное согласование.');
+                logEvent('info', 'department_approved', "appeal_id={$id}");
+             } elseif ($op === 'revise' && $departmentHead && $s === 'department_review') {
+                $reason = field('reason', 1000);
                 query("UPDATE appeal SET status='work' WHERE id=?", [$id]);
-                event($id, 'На доработку');
+                event($id, 'Начальник отдела вернул ответ исполнителю на доработку. Причина: ' . $reason);
+                setFlash('success', 'Возвращено исполнителю.');
+                logEvent('info', 'department_revised', "appeal_id={$id}");
+            } elseif ($op === 'approve' && $manager && $s === 'manager_review') {
+                query("UPDATE appeal SET status='closed' WHERE id=?", [$id]);
+                event($id, 'Руководитель согласовал ответ и направил заявителю');
+                setFlash('success', 'Ответ согласован и направлен заявителю.');
+                logEvent('info', 'appeal_approved', "appeal_id={$id}");
+             } elseif ($op === 'revise' && $manager && $s === 'manager_review') {
+                $reason = field('reason', 1000);
+                query("UPDATE appeal SET status='work' WHERE id=?", [$id]);
+                event($id, 'Руководитель вернул ответ исполнителю на доработку. Причина: ' . $reason);
                 setFlash('success', 'Возвращено.');
                 logEvent('info', 'appeal_revised', "appeal_id={$id}");
             } else {
@@ -398,7 +468,7 @@ function options(): string
 {
     $r = '';
     // Выводим сначала отделы, потом УПП, сгруппированные по районам
-    foreach (query('SELECT * FROM precinct ORDER BY is_department DESC, district, name') as $p) {
+    foreach (query('SELECT * FROM precinct WHERE is_department=0 AND officer IS NOT NULL ORDER BY district, name') as $p) {
         $label = e($p['district']) . ' — ' . e($p['name']);
         if (!empty($p['address'])) {
             $label .= ' (' . e($p['address']) . ')';

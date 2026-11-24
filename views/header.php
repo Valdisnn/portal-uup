@@ -32,7 +32,7 @@
     <nav style="max-width:1100px; margin:0 auto; padding:12px 20px 0;">
         <a href="?page=cabinet" style="text-decoration:none; padding:10px 16px; border-bottom:3px solid <?= $page==='cabinet'?'var(--mvd-red)':'transparent' ?>; font-weight:600;">Личный кабинет</a>
         <a href="?page=directory" style="text-decoration:none; padding:10px 16px; border-bottom:3px solid <?= $page==='directory'?'var(--mvd-red)':'transparent' ?>; font-weight:600;">Участки и прием</a>
-        <?php if ($user['role'] === 'manager'): ?>
+        <?php if (in_array($user['role'], ['manager', 'department_head'], true)): ?>
             <a href="?page=stats" style="text-decoration:none; padding:10px 16px; border-bottom:3px solid <?= $page==='stats'?'var(--mvd-red)':'transparent' ?>; font-weight:600;">Статистика</a>
         <?php endif; ?>
     </nav>

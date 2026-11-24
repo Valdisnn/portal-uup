@@ -32,9 +32,13 @@ if (!in_array($page, $knownPages, true) && !$a) {
 if ($page === 'cabinet') {
     $where = ['1=1'];
     $args = [];
-    if ($user['role'] !== 'manager') {
-        $where[] = ($user['role'] === 'citizen' ? 'citizen' : 'officer') . '=?';
-        $args[] = $user['id'];
+    if ($user['role'] === 'citizen') {
+        $where[] = 'citizen=?'; $args[] = $user['id'];
+    } elseif ($user['role'] === 'officer') {
+        $where[] = 'officer=?'; $args[] = $user['id'];
+    } elseif ($user['role'] === 'department_head') {
+        $where[] = "precinct_id IN (SELECT up.id FROM precinct up JOIN precinct d ON d.district=up.district AND d.is_department=1 WHERE d.id=? AND up.is_department=0)";
+        $args[] = (int)$user['department_id'];
     }
     if ($statusFilter !== '' && isset($states[$statusFilter])) {
         $where[] = 'status=?';
@@ -52,53 +56,92 @@ if ($page === 'cabinet') {
     $list = query("SELECT * FROM appeal WHERE $whereSql ORDER BY due, id DESC LIMIT $limit OFFSET $offset", $args)->fetchAll();
 }
 
-if ($page === 'stats' && $user['role'] === 'manager') {
+if ($page === 'stats' && in_array($user['role'], ['manager', 'department_head'], true)) {
     $period = queryString('period') ?: 'all';
     $dateFrom = queryString('date_from');
     $dateTo = queryString('date_to');
 
     $whereDate = '1=1';
     $dateArgs = [];
-
+    // Руководитель видит всю статистику, начальник отдела — только свой отдел.
+    $departmentScope = '';
+    $scopeArgs = [];
+    if ($user['role'] === 'department_head') {
+        $departmentId = (int)($user['department_id'] ?? 0);
+        if ($departmentId <= 0) {
+            throw new RuntimeException('Для учётной записи начальника отдела не указан отдел.');
+        }
+        $departmentScope = " AND EXISTS (
+            SELECT 1 FROM precinct up
+            JOIN precinct dep ON dep.district = up.district AND dep.is_department = 1
+            WHERE up.id = a.precinct_id AND up.is_department = 0 AND dep.id = ?
+        )";
+        $scopeArgs[] = $departmentId;
+    }
     if ($period === 'month') {
-        $whereDate = 'DATE(created) >= DATE_FORMAT(CURRENT_DATE, "%Y-%m-01")';
+        $whereDate = 'created >= DATE_FORMAT(CURRENT_DATE, "%Y-%m-01")';
     } elseif ($period === 'quarter') {
         $whereDate = 'YEAR(created)=YEAR(CURRENT_DATE) AND QUARTER(created)=QUARTER(CURRENT_DATE)';
     } elseif ($period === 'year') {
         $whereDate = 'YEAR(created)=YEAR(CURRENT_DATE)';
-    } elseif ($period === 'custom' && $dateFrom && $dateTo) {
-        $whereDate = 'DATE(created) BETWEEN ? AND ?';
-        $dateArgs = [$dateFrom, $dateTo];
+    } elseif ($period === 'custom') {
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom <= $dateTo) {
+            $whereDate = 'DATE(created) BETWEEN ? AND ?';
+            $dateArgs = [$dateFrom, $dateTo];
+        } else {
+            $period = 'all';
+            $dateFrom = $dateTo = '';
+        }
     }
 
-    $statsTotal = query("SELECT COUNT(*) total, COUNT(CASE WHEN status='closed' THEN 1 END) closed, COUNT(CASE WHEN status!='closed' AND due<CURRENT_DATE THEN 1 END) late FROM appeal WHERE $whereDate", $dateArgs)->fetch();
+    $statsTotal = query("SELECT
+        COUNT(*) total,
+        SUM(status='closed') closed,
+        SUM(status<>'closed') active,
+        SUM(status<>'closed' AND due<CURRENT_DATE) late,
+        SUM(status='manual') manual_count,
+        SUM(status='assigned') assigned_count,
+        SUM(status='work') work_count,
+        SUM(status IN ('review','department_review','manager_review')) review_count,
+        SUM(status='closed' AND due >= DATE(COALESCE(
+            (SELECT MIN(h.created) FROM history h
+             WHERE h.appeal_id=a.id AND h.event LIKE '%согласован и направлен заявителю%'),
+            a.created))) closed_in_due
+        FROM appeal a WHERE $whereDate $departmentScope", array_merge($dateArgs, $scopeArgs))->fetch();
 
-    $catStats = query("SELECT category, COUNT(*) n FROM appeal WHERE $whereDate GROUP BY category", $dateArgs)->fetchAll();
+    $catStats = query("SELECT a.category, COUNT(*) n FROM appeal a WHERE $whereDate $departmentScope GROUP BY a.category ORDER BY n DESC", array_merge($dateArgs, $scopeArgs))->fetchAll();
     $chartLabels = array_column($catStats, 'category');
-    $chartData = array_column($catStats, 'n');
+    $chartData = array_map('intval', array_column($catStats, 'n'));
 
-    $statusStats = query("SELECT status, COUNT(*) n FROM appeal WHERE $whereDate GROUP BY status", $dateArgs)->fetchAll();
+    $statusStats = query("SELECT a.status, COUNT(*) n FROM appeal a WHERE $whereDate $departmentScope GROUP BY a.status ORDER BY n DESC", array_merge($dateArgs, $scopeArgs))->fetchAll();
     $statusLabels = [];
     $statusData = [];
-    foreach ($statusStats as $s) {
-        $statusLabels[] = $states[$s['status']];
-        $statusData[] = $s['n'];
+    foreach ($statusStats as $st) {
+        $statusLabels[] = $states[$st['status']] ?? $st['status'];
+        $statusData[] = (int)$st['n'];
     }
 
-    // Динамика по месяцам — последние 12 месяцев (не зависит от фильтра)
-    $trendStats = query("
-        SELECT DATE_FORMAT(created, '%Y-%m') AS month, COUNT(*) AS n
-        FROM appeal
-        WHERE created >= DATE_SUB(CURRENT_DATE, INTERVAL 12 MONTH)
-        GROUP BY DATE_FORMAT(created, '%Y-%m')
-        ORDER BY month
-    ")->fetchAll();
+    $trendStats = query("SELECT DATE_FORMAT(created, '%Y-%m') month, COUNT(*) n
+        FROM appeal a WHERE a.created >= DATE_SUB(CURRENT_DATE, INTERVAL 12 MONTH) $departmentScope
+        GROUP BY DATE_FORMAT(a.created, '%Y-%m') ORDER BY month", $scopeArgs)->fetchAll();
     $trendLabels = [];
     $trendData = [];
     foreach ($trendStats as $t) {
-        $trendLabels[] = date('M Y', strtotime($t['month'] . '-01'));
-        $trendData[] = (int) $t['n'];
+        $trendLabels[] = date('m.Y', strtotime($t['month'] . '-01'));
+        $trendData[] = (int)$t['n'];
     }
+
+    $averageDays = query("SELECT AVG(GREATEST(DATEDIFF(COALESCE(
+        (SELECT MAX(h.created) FROM history h WHERE h.appeal_id=a.id AND h.event LIKE '%согласован%'),
+        IF(a.status='closed', a.created, NULL)), a.created),0))
+        FROM appeal a WHERE $whereDate $departmentScope", array_merge($dateArgs, $scopeArgs))->fetchColumn();
+
+    $categoryTable = $catStats;
+    $departmentTable = query("SELECT p.district, COUNT(a.id) total,
+        SUM(a.status='closed') closed, SUM(a.status<>'closed') active,
+        SUM(a.status<>'closed' AND a.due<CURRENT_DATE) late
+        FROM appeal a LEFT JOIN precinct p ON p.id=a.precinct_id
+        WHERE $whereDate $departmentScope GROUP BY p.district ORDER BY total DESC", array_merge($dateArgs, $scopeArgs))->fetchAll();
 }
 
 if ($page === 'directory') {
@@ -125,7 +168,7 @@ elseif ($a)
     require __DIR__ . '/views/appeal.php';
 elseif ($page === 'new' && $user['role'] === 'citizen')
     require __DIR__ . '/views/create.php';
-elseif ($page === 'stats' && $user['role'] === 'manager')
+elseif ($page === 'stats' && in_array($user['role'], ['manager', 'department_head'], true))
     require __DIR__ . '/views/stats.php';
 elseif ($page === '404')
     require __DIR__ . '/views/404.php';
